@@ -204,6 +204,8 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent
 #myPlay .lastp { gap: 6px; }
 .chips { display: flex; gap: 4px; flex-wrap: wrap; grid-column: 1 / -1; }
 .chip { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: color-mix(in srgb, var(--sun) 16%, transparent); color: var(--sun); }
+.chip.D { background: color-mix(in srgb, var(--moon) 18%, transparent); color: var(--moon); }
+.chip.x { text-decoration: line-through; opacity: .6; }
 .kick { grid-column: 1 / -1; justify-self: start; padding: 5px 10px; font-size: 12px; }
 .center { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 16px; align-items: center; }
 .decks { display: flex; gap: 14px; align-items: flex-end; }
@@ -472,7 +474,7 @@ const ITEMS = {
   PA: ['Pá de Coveiro', 'Puxe 1 carta à sua escolha do seu cemitério.', 'D', 2],
   LADRAO: ['Ladrão de Túmulos', 'Pegue 1 carta aleatória do cemitério de outro jogador.', 'D', 2],
   MAO_LEVE: ['Mão Leve', 'Roube 1 item aleatório de um oponente.', 'D', 2],
-  ISCA: ['Isca de Monstro', 'Troque o monstro dormindo pelo próximo do monte.', 'D', 2],
+  ISCA: ['Isca de Monstro', 'Depois que o monstro acorda, troque-o pelo próximo do monte. O Caos da rodada continua valendo para o novo monstro.', 'A', 2],
   BANDEIRA: ['Bandeira', 'Escolha um território: para você, o monstro também é desse território nesta rodada.', 'D', 2],
   DISFARCE: ['Disfarce', 'Escolha uma característica: todos os goblins que você jogar nesta rodada a têm.', 'D', 2],
   TAMBOR: ['Tambor de Guerra', 'Nesta rodada você pode jogar até 4 goblins.', 'D', 2],
@@ -486,7 +488,7 @@ const ITEMS = {
   CHAPEU: ['Chapéu Pontudo', 'Cada goblin de Chapéu jogado vale até ±2.', 'A', 2],
   POCAO: ['Poção Maluca', 'Um goblin Maluco jogado vale o dobro ou a metade.', 'A', 2],
   POMADA: ['Pomada de Verruga', 'Se jogou goblin de Verruga: de −3 a +3 na sua soma.', 'A', 2],
-  CHINELO: ['Chinelo Veloz', 'Se você perder nesta rodada, um goblin de Chinelo jogado volta para a mão.', 'A', 2],
+  CHINELO: ['Chinelo Veloz', 'Se você perder nesta rodada, um goblin de Chinelo jogado, à sua escolha, volta para a mão.', 'A', 2],
   NAO: ['NÃO!', 'Cancele um item de Monstro Acordado de qualquer jogador. Pode ser respondido com outro NÃO!. O jogo pergunta na hora.', 'A', 3],
   ARMADILHA: ['Armadilha', 'Nesta rodada, quem roubar ou eliminar uma carta sua perde 1 carta aleatória.', 'A', 2],
   GRITO: ['Grito de Guerra', 'O monstro vale +2 ou −2 para todos, à sua escolha.', 'A', 2],
@@ -566,7 +568,8 @@ function addItem(p, key) {
   if (key === 'SACO') { G.idisc.push('SACO'); log(`${nm(p)}: Saco de Moedas — compra 2 itens.`, 'it'); for (let k = 0; k < 2; k++) { const x = drawFrom('ideck', 'idisc'); if (x) addItem(p, x); } return; }
   p.items.push(key);
 }
-const useItem = (p, k) => { const i = p.items.indexOf(k); if (i < 0) return false; p.items.splice(i, 1); G.idisc.push(k); return true; };
+const useItem = (p, k) => { const i = p.items.indexOf(k); if (i < 0) return false; p.items.splice(i, 1); G.idisc.push(k); const rd = G.rd && G.rd[p.id]; if (rd) (rd.used || (rd.used = [])).push({ k }); return true; };
+const lastUse = p => { const u = G.rd && G.rd[p.id] && G.rd[p.id].used; return u && u.length ? u[u.length - 1] : {}; };
 function toGrave(p, g) { const i = p.hand.indexOf(g); if (i >= 0) p.hand.splice(i, 1); G.grave[p.id].push(g); }
 const armed = (p, k) => G.rd[p.id].armed.includes(k);
 
@@ -737,6 +740,7 @@ function botWindowPick(p) {
   if (!winning) {
     for (const k of ['AMULETO', 'ESCUDO', 'ARMADILHA']) if (p.items.includes(k) && !armed(p, k) && (k !== 'AMULETO' || rd.gs.length >= 2 || p.hand.length <= 3)) return { k, args: {} };
     if (p.items.includes('CHINELO') && !armed(p, 'CHINELO') && rd.gs.length > 1 && rd.gs.some(g => traitsOf(p, g) & CN)) return { k: 'CHINELO', args: {} };
+    if (p.items.includes('ISCA') && canUse(p, 'ISCA', 'window') && !noTarget()) { const me = cur.F.find(x => x.p === p); if (me && (me.d >= 4 || me.out)) return { k: 'ISCA', args: {} }; }
   }
   return null;
 }
@@ -826,7 +830,8 @@ async function itemWindow() {
     const { p, k, args } = act;
     if (!canUse(p, k, 'window')) continue;
     fx({ type: 'pop', pid: p.id, text: ITEMS[k][0], good: true }, false);
-    if (await naoChain(p, k, args)) { useItem(p, k); log(`${ITEMS[k][0]} de ${nm(p)} foi cancelado pelo NÃO!.`, 'it'); fx({ type: 'toast', text: `${ITEMS[k][0]} de ${nm(p)} foi cancelado.` }, false); sync(); continue; }
+    fx({ type: 'toast', to: G.players.filter(q => q !== p).map(q => q.id), text: `${nm(p)} usou ${ITEMS[k][0]}${args && args.d ? ` (${args.d > 0 ? '+' : ''}${args.d})` : ''}.` }, false);
+    if (await naoChain(p, k, args)) { useItem(p, k); lastUse(p).x = 1; log(`${ITEMS[k][0]} de ${nm(p)} foi cancelado pelo NÃO!.`, 'it'); fx({ type: 'toast', text: `${ITEMS[k][0]} de ${nm(p)} foi cancelado.` }, false); sync(); continue; }
     await execUse(p, k, args);
     if (!IS_SIM()) await wait(350);
   }
@@ -947,7 +952,7 @@ function canUse(p, k, phase) {
     }
     return true;
   }
-  if (phase === 'window' && w === 'A') { if (k === 'NAO') return false; if (ARMS.includes(k)) return !armed(p, k); if (k === 'GRITO') return true; return itemOptions(p, k).length > 0; }
+  if (phase === 'window' && w === 'A') { if (k === 'NAO') return false; if (ARMS.includes(k)) return !armed(p, k); if (k === 'GRITO') return true; if (k === 'ISCA') return G.monsters.length + G.mused.length > 2; return itemOptions(p, k).length > 0; }
   return false;
 }
 async function naoDuel(attacker, defender, what) {
@@ -978,14 +983,26 @@ async function execUse(p, k, a) {
     case 'PA': { const gr = G.grave[p.id], i = gr.indexOf(a.g); if (i < 0) return; useItem(p, k); gr.splice(i, 1); p.hand.push(a.g); log(`${nm(p)} usou Pá de Coveiro.`, 'it'); await fx({ type: 'fly', from: 'seat:' + p.id, to2: 'hand:' + p.id, card: { g: a.g, vis: [p.id] } }); break; }
     case 'LADRAO': { const o = G.players[a.target]; if (!o || o === p || !G.grave[o.id].length) return; useItem(p, k); const g = G.grave[o.id].splice(rnd(G.grave[o.id].length), 1)[0]; p.hand.push(g); log(`${nm(p)} usou Ladrão de Túmulos no cemitério de ${nm(o)}.`, 'it'); fx({ type: 'toast', to: p.id, text: `Você pegou o ${gobTxt(g)}!` }, false); await fx({ type: 'fly', from: 'seat:' + o.id, to2: 'hand:' + p.id, card: { g, vis: [p.id] } }); break; }
     case 'MAO_LEVE': { const o = okTarget(a.target); if (!o || !o.items.length) return; useItem(p, k); const it = o.items.splice(rnd(o.items.length), 1)[0]; addItem(p, it); log(`${nm(p)} roubou um item de ${nm(o)}.`, 'it'); fx({ type: 'toast', to: p.id, text: `Você roubou: ${ITEMS[it][0]}` }, false); fx({ type: 'toast', to: o.id, text: `${nm(p)} roubou seu ${ITEMS[it][0]}!` }, false); break; }
-    case 'ISCA': { if (!G.monsters.length) return; useItem(p, k); G.mused.splice(G.mused.indexOf(G.monster), 1); G.monsters.unshift(G.monster); shuffle(G.monsters); G.monster = chaosIs('OPOSTOS') ? drawMonster(m => m.v <= 24) : G.monsters.pop(); if (!chaosIs('OPOSTOS')) G.mused.push(G.monster); for (const q of G.players) { const h = G.rd[q.id].hint; h.value = -1; if (h.t1 !== null && h.t1 !== undefined) { h.t1 = G.monster.ts[0]; h.par = monVal() % 2 === 0 ? 1 : 2; } } log(`${nm(p)} usou Isca de Monstro: o monstro dormindo foi trocado.`, 'it'); fx({ type: 'pop', pid: p.id, text: 'Isca de Monstro!', good: true }, false); break; }
-    case 'BANDEIRA': { const c = +a.c; if (!(c >= 0 && c < 4)) return; useItem(p, k); rd.band = c; log(`${nm(p)} fincou a Bandeira ${CLAN[c]}.`, 'it'); fx({ type: 'pop', pid: p.id, text: 'Bandeira ' + CLAN[c], good: true }, false); break; }
-    case 'DISFARCE': { const t = +a.t; if (!TRAITS.includes(t)) return; useItem(p, k); rd.disg = t; log(`${nm(p)} usou Disfarce (${TNAME[t]}).`, 'it'); break; }
+    case 'ISCA': {
+      if (G.monsters.length + G.mused.length <= 2) return;
+      useItem(p, k);
+      const old = G.monster, oi = G.mused.indexOf(old); if (oi >= 0) G.mused.splice(oi, 1);
+      G.monster = chaosIs('OPOSTOS') ? drawMonster(m => m.v <= 24 && m !== old) : drawMonster(m => m !== old && m !== G.monster2);
+      G.monsters.unshift(old); shuffle(G.monsters);
+      for (const q of G.players) G.rd[q.id].hint.value = -1;
+      log(`${nm(p)} usou Isca de Monstro: o ${old.v} foi embora e chegou o ${G.monster.v}${monVal() !== G.monster.v ? ` (vale ${monVal()})` : ''}.`, 'it');
+      fx({ type: 'pop', pid: p.id, text: 'Isca de Monstro', good: true }, false);
+      fx({ type: 'toast', text: `Isca de Monstro: o monstro ${old.v} trocou pelo ${G.monster.v}. O Caos continua valendo.` }, false);
+      break;
+    }
+    case 'BANDEIRA': { const c = +a.c; if (!(c >= 0 && c < 4)) return; useItem(p, k); rd.band = c; lastUse(p).c = c; log(`${nm(p)} fincou a Bandeira ${CLAN[c]}.`, 'it'); fx({ type: 'pop', pid: p.id, text: 'Bandeira ' + CLAN[c], good: true }, false); break; }
+    case 'DISFARCE': { const t = +a.t; if (!TRAITS.includes(t)) return; useItem(p, k); rd.disg = t; lastUse(p).t = t; log(`${nm(p)} usou Disfarce (${TNAME[t]}).`, 'it'); break; }
     case 'TAMBOR': useItem(p, k); rd.tambor = true; log(`${nm(p)} tocou o Tambor de Guerra.`, 'it'); fx({ type: 'pop', pid: p.id, text: 'Tambor de Guerra', good: true }, false); break;
     case 'SACO': useItem(p, k); addItem(p, 'SACO'); fx({ type: 'toast', to: p.id, text: 'Saco de Moedas: +2 itens' }, false); break;
     case 'GRITO': case 'PORRETE': case 'PE_CABRA': case 'AJUSTE': case 'OCULOS': case 'CHAPEU': case 'POCAO': case 'POMADA': {
       const d = +a.d; if (k === 'GRITO' ? ![2, -2].includes(d) : !itemOptions(p, k).some(o => o.d === d)) return;
       useItem(p, k);
+      lastUse(p).d = d;
       if (k === 'GRITO') { G.monMod += d; log(`${nm(p)} usou Grito de Guerra: monstro ${d > 0 ? '+' : ''}${d}.`, 'it'); }
       else { rd.delta += d; log(`${nm(p)} usou ${ITEMS[k][0]} (${d > 0 ? '+' : ''}${d}).`, 'it'); }
       fx({ type: 'pop', pid: p.id, text: `${ITEMS[k][0]} ${d > 0 ? '+' : ''}${d}`, good: true }, false); break;
@@ -1165,7 +1182,7 @@ async function playRound() {
     if (armed(p, 'AMULETO')) { log(`${nm(p)} perdeu, mas o Amuleto salvou as cartas.`, 'it'); fx({ type: 'toast', to: p.id, text: 'Você perdeu, mas o Amuleto devolveu as cartas para a sua mão.' }, false); fx({ type: 'pop', pid: p.id, text: 'Amuleto', good: true }, false); }
     else {
       let keep = null;
-      if (armed(p, 'CHINELO')) { const c = rd.gs.filter(g => traitsOf(p, g) & CN); if (c.length) keep = c.reduce((a, g) => gv(g) > gv(a) ? g : a); if (keep) log(`Chinelo Veloz: ${nm(p)} salvou o ${gobTxt(keep)}.`, 'it'); }
+      if (armed(p, 'CHINELO')) { const c = rd.gs.filter(g => traitsOf(p, g) & CN); if (c.length > 1 && isHuman(p)) { const r = await prompt(p.id, 'ask', { title: 'Chinelo Veloz', text: 'Você perdeu. Qual goblin de Chinelo volta para a sua mão?', options: c.map(g => ({ label: gobTxt(g), value: g })), botValue: c[0] }); keep = c.includes(+r.value) ? +r.value : c[0]; } else if (c.length) keep = c.reduce((a, g) => gv(g) > gv(a) ? g : a); if (keep) log(`Chinelo Veloz: ${nm(p)} salvou o ${gobTxt(keep)}.`, 'it'); }
       const gone = rd.gs.filter(g => g !== keep);
       if (chaosIs('BANQUETE') && winners.size) {
         const W = ord().filter(x => winners.has(x));
@@ -1396,6 +1413,7 @@ function leaveTable() {
 // =====================================================================
 // TELAS
 // =====================================================================
+const usedChips = rd => (rd.used || []).map(u => `<span class="chip ${ITEMS[u.k][2]} ${u.x ? 'x' : ''}" title="${esc(ITEMS[u.k][1])}">${ITEMS[u.k][0]}${u.d ? ` ${u.d > 0 ? '+' : ''}${u.d}` : ''}${u.c !== undefined ? ` ${CLAN[u.c]}` : ''}${u.t ? ` ${TNAME[u.t]}` : ''}${u.x ? ' · cancelado' : ''}</span>`);
 function showGame() { $('menu').classList.add('hidden'); $('lobby').classList.add('hidden'); $('game').classList.remove('hidden'); }
 function showLobby() {
   $('menu').classList.add('hidden'); $('game').classList.add('hidden'); $('lobby').classList.remove('hidden');
@@ -1452,7 +1470,7 @@ function oppHTML(p) {
   const myPe = G.pend[ME], isT = !LOCAL.spec && myPe && (myPe.kind === 'steal' || myPe.kind === 'elim') && myPe.data.T.includes(p.id) && !LOCAL.answered[myPe.nonce];
   const pe = G.pend[p.id], waiting = (pe && !p.bot && pe.kind !== 'next') || (p.bot && p.alive && G.phase === 'dormindo' && !rd.gs.length && !(G.ready || {})[p.id] && !(G.duel && !G.duel.includes(p.id)) && p.hand.length);
   const acting = G.act && G.act.pid === p.id;
-  const chips = rd.armed.map(k => `<span class="chip">${ITEMS[k][0]}</span>`).concat(rd.tambor ? ['<span class="chip">Tambor</span>'] : [], rd.band >= 0 ? [`<span class="chip">Bandeira ${CLAN[rd.band]}</span>`] : []);
+  const chips = usedChips(rd);
   const canKick = MODE === 'online' && NET.isHost && waiting && Date.now() - (NET.waitSince[p.id] || Date.now()) > 30000;
   const k = KINGS[p.king], kon = kingActive(p), sitting = G.duel && !G.duel.includes(p.id);
   return `<div class="seat ${acting ? 'acting' : ''} ${p.alive ? '' : 'out'} ${G.chief === p.id ? 'chief' : ''} ${isT ? 'target' + (myPe.kind === 'steal' ? ' steal' : '') : ''} ${G.result && G.result.w.includes(p.id) && G.phase === 'resultado' ? 'winner' : ''}" data-id="${p.id}" ${isT ? `data-tgt="${p.id}"` : ''}>
@@ -1518,7 +1536,7 @@ function render(deal) {
   const fx2 = rd.armed.map(a => `<div class="fx"><b>${ITEMS[a][0]}</b> preparado · ${ITEMS[a][1]}</div>`)
     .concat(rd.band >= 0 ? [`<div class="fx"><b>Bandeira ${CLAN[rd.band]}</b> · para você o monstro também é ${CLAN[rd.band]}</div>`] : [], rd.disg ? [`<div class="fx"><b>Disfarce</b> · seus goblins jogados têm ${TNAME[rd.disg]}</div>`] : []);
   $('meBox').innerHTML = `<div class="oname"><span class="dot" style="background:${CCSS[me.color]}"></span>${esc(nameOf(ME))}${G.chief === ME ? `<span style="color:var(--accent)">${ic('crown')}</span>` : ''}${me.alive ? '' : '<span class="res l">Faliu</span>'}</div>
-    <div class="stats"><span title="Cartas na mão">${ic('cards')}<b>${me.hand.length}</b></span><span title="Itens">${ic('bag')}<b>${me.items.length}</b></span><span title="Cemitério">${ic('grave')}<b>${G.grave[ME].length}</b></span></div>
+    <div class="stats"><span title="Cartas na mão">${ic('cards')}<b>${me.hand.length}</b></span><span title="Itens">${ic('bag')}<b>${me.items.length}</b></span><span title="Cemitério">${ic('grave')}<b>${G.grave[ME].length}</b></span></div>${(G.rd[ME].used || []).length ? `<div class="chips">${usedChips(G.rd[ME]).join('')}</div>` : ''}
     <button class="kingrow ${kon ? '' : 'off'}" id="kingToggle"><span class="cr" id="myKing" style="color:${CCSS[me.king]};background:color-mix(in srgb, ${CCSS[me.king]} 22%, transparent)">${ic('crown')}</span><span><b>${k.name}</b><small>${k.short}${kon ? '' : ' · desligado nesta rodada'} · ${LOCAL.kingOpen ? 'toque para fechar' : 'toque para ver'}</small></span>${LOCAL.kingOpen ? `<span class="full">${k.text}</span>` : ''}</button>
     <div class="lend">Empresta ${traitIcons(k.tr)} aos ${lendTxt(me.king)}</div>
     ${fx2.join('')}`;
