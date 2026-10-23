@@ -461,7 +461,7 @@ const traitNames = t => TRAITS.filter(x => t & x).map(x => TNAME[x]).join(' · '
 const KINGS = [
   { name: 'Rei Quebra-Crânio', short: 'Fúria', tr: CH | BA, lend: 'par', text: 'Fúria: ao vencer por aproximação, elimina 2 cartas em vez de 1; ao cravar, além de roubar, elimina 1 carta.' },
   { name: 'Rainha Musgo-Podre', short: 'Brotar', tr: VE | MA, lend: 'baixo', text: 'Brotar: no início da rodada, se você tiver menos cartas que todos os rivais, puxa 1 carta aleatória do seu cemitério.' },
-  { name: 'Rei Olho-de-Vidro', short: 'Monóculo', tr: OC | CN, lend: 'impar', text: 'Monóculo: quando o monstro for do território Azul e você jogar um goblin azul, sua margem de território é ±2 em vez de ±1.' },
+  { name: 'Rei Olho-de-Vidro', short: 'Monóculo', tr: OC | CN, lend: 'impar', text: 'Monóculo: quando o monstro for do território Azul, sua margem é ±2, jogando qualquer goblin.' },
   { name: 'Rainha Dente-de-Ouro', short: 'Mercadora', tr: CH | VE, lend: 'alto', text: 'Mercadora: sempre que compra um item, compra 2 e fica com o melhor.' },
 ];
 const LEND = { par: ['goblins pares', v => v % 2 === 0], impar: ['goblins ímpares', v => v % 2 === 1], baixo: ['goblins de 1 a 10', v => v <= 10], alto: ['goblins de 11 a 20', v => v >= 11] };
@@ -505,7 +505,7 @@ const CHAOS = {
   GIGANTE: ['Monstro Gigante', 'O monstro vale +10.', 2],
   ANAO: ['Monstro Anão', 'O monstro vale −6.', 2],
   CEGAS: ['Às Cegas', 'Depois que todos jogam, um dos seus goblins jogados é trocado por um goblin aleatório da sua mão.', 4],
-  ROLETA: ['Roleta', 'Depois que todos jogam, cada um soma mais 1 goblin aleatório da própria mão.', 3],
+  ROLETA: ['Roleta', 'Depois que todos jogam, cada um puxa às cegas 1 carta da mão do jogador à sua direita e soma ao seu palpite. No fim da rodada a carta volta para o dono.', 3],
   MUTANTE: ['Monstro Mutante', 'Na revelação vira um segundo monstro: se for par, o monstro vale +5; se for ímpar, −5.', 2],
   MALDICAO: ['Maldição', 'Uma característica sorteada vale 0. Reis e rainhas com ela ficam desligados.', 2],
   TROCA: ['Troca-Troca', 'No início da rodada, todos passam a mão inteira para o jogador da esquerda.', 2],
@@ -556,7 +556,7 @@ const monOf = m => (chaosIs('GIGANTE') ? m.v + 10 : chaosIs('ANAO') ? Math.max(1
 const monVal = () => monOf(G.monster);
 const noTarget = () => chaosIs('INVERSO') || chaosIs('MENOR') || chaosIs('MAIOR');
 function terrOf(p, m) { const s = m.ts.slice(); const b = G.rd[p.id].band; if (b >= 0 && !s.includes(b)) s.push(b); return s; }
-function margin(p, gs, m) { if (noTarget()) return 0; const ts = terrOf(p, m || G.monster); if (!gs.some(g => ts.includes(gc(g)))) return 0; return hasKing(p, 2) && ts.includes(2) && gs.some(g => gc(g) === 2) ? 2 : 1; }
+function margin(p, gs, m) { if (noTarget()) return 0; const ts = terrOf(p, m || G.monster); if (hasKing(p, 2) && ts.includes(2)) return 2; return gs.some(g => ts.includes(gc(g))) ? 1 : 0; }
 const monocle = () => false;
 const playable = p => p.hand;
 function playLimit(p) { const n = p.hand.length; return [chaosIs('MENOR') ? Math.min(2, n) : 1, Math.max(1, Math.min(n, G.rd[p.id].tambor ? 4 : 3))]; }
@@ -670,7 +670,45 @@ function monsterOutcomes(p, info) {
   if (info.par && info.value < 0) { const f = mons.filter(m => (monOf(m) % 2 === 0 ? 1 : 2) === info.par); if (f.length) mons = f; }
   return mons.map(m => ({ m, M: monOf(m) }));
 }
+const PERSONAS = {
+  ousado: { name: 'Ousado', k: [.10, .35, .55], bias: 3, sd: 3.5, whim: .10 },
+  cauteloso: { name: 'Cauteloso', k: [.45, .40, .15], bias: -3, sd: 3, whim: .08 },
+  caotico: { name: 'Caótico', k: [.34, .33, .33], bias: 0, sd: 7, whim: .30 },
+  imitador: { name: 'Imitador', k: [.25, .45, .30], bias: 0, sd: 3, whim: .12 },
+  leitor: { name: 'Leitor', k: [.20, .45, .35], bias: 0, sd: 2.5, whim: .06 },
+};
+const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+// escolhe como uma pessoa: um alvo com lógica, um pouco de erro e, às vezes, um palpite no impulso
+function humanChoose(p, info) {
+  const P0 = PERSONAS[p.persona] || PERSONAS.leitor, pool = p.hand, [kmin, kmax] = playLimit(p);
+  if (!pool.length) return [];
+  const vals = pool.map(g => val(p, g));
+  let k; { const r = Math.random(); k = r < P0.k[0] ? 1 : r < P0.k[0] + P0.k[1] ? 2 : 3; if (G.rd[p.id].tambor && Math.random() < .5) k = 4; }
+  k = Math.max(kmin, Math.min(kmax, k, pool.length));
+  if (Math.random() < P0.whim) return shuffle(pool.slice()).slice(0, k);
+  const outs = monsterOutcomes(p, info), E = outs.reduce((a, o) => a + o.M, 0) / outs.length;
+  let T = E + P0.bias + gauss() * P0.sd;
+  if (p.persona === 'imitador' && G.lastWinSum) T = G.lastWinSum + gauss() * 3;
+  if (chaosIs('OPOSTOS') && Math.random() < .5) T = 32 + gauss() * 4;
+  if (chaosIs('MENOR')) T = 0;
+  if (chaosIs('MAIOR')) T = 99;
+  if (chaosIs('INVERSO')) T = E < 25 ? 45 : 0;
+  const dodge = (chaosIs('ZONA') && Math.random() < .85) || (chaosIs('IMA') && Math.random() < .6);
+  if (dodge && T >= 20 && T <= 30) T = T < 25 ? 17 - Math.random() * 4 : 33 + Math.random() * 4;
+  const seen = G.openPlays ? alivePl().filter(o => o !== p && G.rd[o.id].gs.length).map(o => rawSum(o)) : [];
+  const cands = [];
+  const rec = (st, ch, sm) => {
+    if (ch.length === k) { let sc = Math.abs(sm - T); if (dodge && inZone(sm)) sc += 20; if (chaosIs('IGUAIS') && seen.includes(sm)) sc += 15; cands.push({ ch: ch.slice(), sc }); return; }
+    for (let i = st; i < pool.length; i++) { ch.push(i); rec(i + 1, ch, sm + vals[i]); ch.pop(); }
+  };
+  rec(0, [], 0);
+  if (!cands.length) return pool.slice(0, k);
+  cands.sort((a, b) => a.sc - b.sc);
+  const r = Math.random(), pickI = r < .6 ? 0 : r < .85 ? 1 : 2;
+  return cands[Math.min(pickI, cands.length - 1)].ch.map(i => pool[i]);
+}
 function botChoose(p, info) {
+  if (!IS_SIM() || p.strat === 'human') return humanChoose(p, info);
   const pool = p.hand, [kmin, kmax] = playLimit(p), vals = pool.map(g => val(p, g)), n = pool.length;
   if (!n) return [];
   const byVal = pool.map((g, i) => i).sort((a, b) => vals[a] - vals[b]);
@@ -1155,7 +1193,15 @@ async function playRound() {
   }
   // cartas que mudam depois da escolha
   if (chaosIs('CEGAS')) for (const p of players) { const rd = G.rd[p.id], rest = p.hand.filter(g => !rd.gs.includes(g)); if (!rest.length || !rd.gs.length) continue; const i = rnd(rd.gs.length), out = rd.gs[i], inn = pick(rest); rd.gs[i] = inn; rd.note = `Às Cegas: ${gobTxt(out)} virou ${gobTxt(inn)}`; fx({ type: 'toast', to: p.id, text: `Às Cegas: seu ${gobTxt(out)} foi trocado pelo ${gobTxt(inn)}.` }, false); }
-  if (chaosIs('ROLETA')) for (const p of players) { const rd = G.rd[p.id], rest = p.hand.filter(g => !rd.gs.includes(g)); if (!rest.length || !rd.gs.length) continue; const inn = pick(rest); rd.gs.push(inn); rd.note = `Roleta: +${gobTxt(inn)}`; fx({ type: 'toast', to: p.id, text: `Roleta: o ${gobTxt(inn)} entrou na sua jogada.` }, false); }
+  if (chaosIs('ROLETA')) for (const p of players) {
+    const rd = G.rd[p.id]; if (!rd.gs.length) continue;
+    let q = null; for (let k = 1; k < G.n; k++) { const c = G.players[(p.id - k + G.n) % G.n]; if (c.alive && c !== p && c.hand.some(g => !G.rd[c.id].gs.includes(g) && !Object.values(G.rd).some(r => r.borrow === g))) { q = c; break; } }
+    if (!q) continue;
+    const rest = q.hand.filter(g => !G.rd[q.id].gs.includes(g) && !Object.values(G.rd).some(r => r.borrow === g)), inn = pick(rest);
+    rd.gs.push(inn); rd.borrow = inn; rd.note = `Roleta: +${gobTxt(inn)} de ${nm(q)}`;
+    log(`Roleta: ${nm(p)} puxou o ${gobTxt(inn)} de ${nm(q)}.`, 'ch');
+    fx({ type: 'toast', to: p.id, text: `Roleta: você puxou o ${gobTxt(inn)} de ${nm(q)}. Ele volta para o dono no fim da rodada.` }, false);
+  }
   sync(); await wait(350);
   // Monstro Acordado
   G.phase = 'acordado';
@@ -1172,6 +1218,7 @@ async function playRound() {
   G.result = { w: R.w.map(p => p.id), kind: R.kind, out: R.F.filter(x => x.out).map(x => [x.p.id, x.out]) };
   for (const x of R.F) if (x.out) log(`${nm(x.p)} somou ${x.S}: ${x.out === 'zona' ? 'caiu na Zona Proibida' : 'soma igual a de outro jogador'} e perde.`, 'ch');
   log(R.kind === 'exact' ? `Cravou: ${R.w.map(nm).join(', ')}` : R.kind === 'closest' ? `Venceu: ${R.w.map(nm).join(', ')}` : 'Ninguém venceu a rodada.', 'rh');
+  { const w0 = R.F.find(x => R.w.includes(x.p)); G.lastWinSum = w0 ? w0.S : null; }
   G.last = {}; for (const x of R.F) G.last[x.p.id] = { gs: G.rd[x.p.id].gs.slice(), S: x.S, d: x.d, out: x.out || '' };
   await fx({ type: 'result', w: R.w.map(p => p.id), kind: R.kind, played: R.F.map(x => x.p.id) });
   if (!IS_SIM()) await wait(1600);
@@ -1182,8 +1229,8 @@ async function playRound() {
     if (armed(p, 'AMULETO')) { log(`${nm(p)} perdeu, mas o Amuleto salvou as cartas.`, 'it'); fx({ type: 'toast', to: p.id, text: 'Você perdeu, mas o Amuleto devolveu as cartas para a sua mão.' }, false); fx({ type: 'pop', pid: p.id, text: 'Amuleto', good: true }, false); }
     else {
       let keep = null;
-      if (armed(p, 'CHINELO')) { const c = rd.gs.filter(g => traitsOf(p, g) & CN); if (c.length > 1 && isHuman(p)) { const r = await prompt(p.id, 'ask', { title: 'Chinelo Veloz', text: 'Você perdeu. Qual goblin de Chinelo volta para a sua mão?', options: c.map(g => ({ label: gobTxt(g), value: g })), botValue: c[0] }); keep = c.includes(+r.value) ? +r.value : c[0]; } else if (c.length) keep = c.reduce((a, g) => gv(g) > gv(a) ? g : a); if (keep) log(`Chinelo Veloz: ${nm(p)} salvou o ${gobTxt(keep)}.`, 'it'); }
-      const gone = rd.gs.filter(g => g !== keep);
+      if (armed(p, 'CHINELO')) { const c = rd.gs.filter(g => (traitsOf(p, g) & CN) && g !== rd.borrow); if (c.length > 1 && isHuman(p)) { const r = await prompt(p.id, 'ask', { title: 'Chinelo Veloz', text: 'Você perdeu. Qual goblin de Chinelo volta para a sua mão?', options: c.map(g => ({ label: gobTxt(g), value: g })), botValue: c[0] }); keep = c.includes(+r.value) ? +r.value : c[0]; } else if (c.length) keep = c.reduce((a, g) => gv(g) > gv(a) ? g : a); if (keep) log(`Chinelo Veloz: ${nm(p)} salvou o ${gobTxt(keep)}.`, 'it'); }
+      const gone = rd.gs.filter(g => g !== keep && g !== rd.borrow);
       if (chaosIs('BANQUETE') && winners.size) {
         const W = ord().filter(x => winners.has(x));
         gone.forEach(g => { G.banq = (G.banq || 0) + 1; const w = W[G.banq % W.length]; const k = p.hand.indexOf(g); if (k >= 0) p.hand.splice(k, 1); w.hand.push(g); log(`Banquete: o ${gobTxt(g)} de ${nm(p)} foi para ${nm(w)}.`, 'ch'); });
@@ -1263,7 +1310,8 @@ function newState(n, seats) {
   for (const [k, v] of Object.entries(ITEMS)) for (let i = 0; i < v[3]; i++) S.ideck.push(k);
   for (const [k, v] of Object.entries(CHAOS)) for (let i = 0; i < v[2]; i++) S.cdeck.push(k);
   shuffle(S.ideck); shuffle(S.cdeck);
-  S.players = seats.map((s, i) => ({ id: i, color: s.color, king: s.color, uid: s.uid || null, bot: !!s.bot, hand: Array.from({ length: 20 }, (_, v) => mk(s.color, v + 1)), items: [], alive: true, out: 0 }));
+  const PK = shuffle(Object.keys(PERSONAS));
+  S.players = seats.map((s, i) => ({ id: i, color: s.color, king: s.color, uid: s.uid || null, bot: !!s.bot, persona: s.bot ? PK[i % PK.length] : null, hand: Array.from({ length: 20 }, (_, v) => mk(s.color, v + 1)), items: [], alive: true, out: 0 }));
   return S;
 }
 function startLocal() {
@@ -1402,6 +1450,14 @@ function resumeHost(S) {
   ME = G.players.findIndex(p => p.uid === NET.uid);
   listenActs(); showGame(); render(true); sync(); gameLoop();
 }
+// sair no meio da partida: no modo contra bots (ou sendo o anfitrião) a página recomeça do menu
+async function leaveGame(sure) {
+  const me = G && G.players && G.players[ME], out = me && !me.alive;
+  const msg = MODE === 'online' && NET.isHost ? 'Você é o anfitrião: se sair, a partida fica parada para os outros até você voltar.' : out ? 'Você faliu. Sair agora encerra a partida contra os bots.' : 'A partida atual será encerrada.';
+  if (!sure || (MODE === 'online' && NET.isHost)) { const ok = await askLocal('Sair da partida?', msg, [{ label: 'Sair', value: 1, cls: 'red' }, { label: 'Ficar', value: 0, cls: 'ghost' }]); if (!ok) return; }
+  if (MODE === 'local' || NET.isHost) { try { location.reload(); } catch (e) { leaveTable(); } return; }
+  leaveTable();
+}
 function leaveTable() {
   if (MODE === 'online' && G && G.status === 'lobby' && !NET.isHost) sendAct({ kind: 'leave' });
   if (NET.unGame) NET.unGame(); if (NET.unActs) NET.unActs(); NET.unGame = NET.unActs = null;
@@ -1414,7 +1470,7 @@ function leaveTable() {
 // TELAS
 // =====================================================================
 const usedChips = rd => (rd.used || []).map(u => `<span class="chip ${ITEMS[u.k][2]} ${u.x ? 'x' : ''}" title="${esc(ITEMS[u.k][1])}">${ITEMS[u.k][0]}${u.d ? ` ${u.d > 0 ? '+' : ''}${u.d}` : ''}${u.c !== undefined ? ` ${CLAN[u.c]}` : ''}${u.t ? ` ${TNAME[u.t]}` : ''}${u.x ? ' · cancelado' : ''}</span>`);
-function showGame() { $('menu').classList.add('hidden'); $('lobby').classList.add('hidden'); $('game').classList.remove('hidden'); }
+function showGame() { LOCAL.deadShown = false; $('menu').classList.add('hidden'); $('lobby').classList.add('hidden'); $('game').classList.remove('hidden'); }
 function showLobby() {
   $('menu').classList.add('hidden'); $('game').classList.add('hidden'); $('lobby').classList.remove('hidden');
   const S = G, seats = S.seats || [];
@@ -1475,7 +1531,7 @@ function oppHTML(p) {
   const k = KINGS[p.king], kon = kingActive(p), sitting = G.duel && !G.duel.includes(p.id);
   return `<div class="seat ${acting ? 'acting' : ''} ${p.alive ? '' : 'out'} ${G.chief === p.id ? 'chief' : ''} ${isT ? 'target' + (myPe.kind === 'steal' ? ' steal' : '') : ''} ${G.result && G.result.w.includes(p.id) && G.phase === 'resultado' ? 'winner' : ''}" data-id="${p.id}" ${isT ? `data-tgt="${p.id}"` : ''}>
     <div style="min-width:0">
-      <div class="oname"><span class="dot" style="background:${CCSS[p.color]}"></span><span class="nmtx">${esc(nameOf(p.id))}</span>${p.bot ? ic('bot') : ''}${G.chief === p.id ? `<span style="color:var(--accent)">${ic('crown')}</span>` : ''}${tag}</div>
+      <div class="oname"><span class="dot" style="background:${CCSS[p.color]}"></span><span class="nmtx">${esc(nameOf(p.id))}</span>${p.bot ? ic('bot') : ''}${p.bot && p.persona && PERSONAS[p.persona] ? `<span class="muted" style="font: 500 12px var(--ui)">${PERSONAS[p.persona].name}</span>` : ''}${G.chief === p.id ? `<span style="color:var(--accent)">${ic('crown')}</span>` : ''}${tag}</div>
       <div class="stats"><span title="Cartas na mão">${ic('cards')}<b>${p.hand.length}</b></span><span title="Itens">${ic('bag')}<b>${p.items.length}</b></span><span title="Cemitério">${ic('grave')}<b>${G.grave[p.id].length}</b></span><span class="${kon ? '' : 'off'}" title="${k.name}: ${k.text}" style="color:${CCSS[p.king]}">${ic('crown')}<span style="color:var(--muted)">${k.short}</span></span></div>
     </div>
     <div class="oplay">${acting ? `<span class="think on">${esc(G.act.text)}</span>` : ''}${play}${!play && waiting && !acting ? '<span class="think on">escolhendo…</span>' : ''}${play && !G.revealed && !G.openPlays && rd.gs.length && G.phase === 'dormindo' ? '<span class="think">pronto</span>' : ''}${!play && sitting ? '<span class="think">fora do duelo</span>' : ''}</div>
@@ -1571,6 +1627,10 @@ function render(deal) {
   else if (ph === 'next') bar = `<span class="say">${me.alive ? 'Rodada encerrada.' : 'Você faliu.'}</span><button id="btnNext">${MODE === 'online' ? 'Pronto' : 'Próxima rodada'}</button>`;
   else if (waitingFor.length) bar = `<span class="say">Aguardando ${waitingFor.map(i => esc(nameOf(i))).join(', ')}…</span>`;
   else bar = `<span class="say">${G.phase === 'acordado' ? 'O monstro acordou…' : G.phase === 'resultado' ? 'Resolvendo a rodada…' : 'Os rivais estão pensando…'}</span>`;
+  if (me && !me.alive && !LOCAL.spec && !(G.over || G.status === 'over') && !(pendMine && !LOCAL.answered[pendMine.nonce])) {
+    bar = `<span class="say">Você faliu. A partida segue entre os outros.</span><button class="ghost" id="btnLeave">Sair da partida</button>`;
+    if (!LOCAL.deadShown) { LOCAL.deadShown = true; setTimeout(async () => { if (!G || !G.players || G.over) return; const v = await askLocal('Você faliu!', 'Ficou sem cartas na mão. Quer assistir até o fim ou sair da partida?', [{ label: 'Assistir', value: 0, cls: 'ghost' }, { label: 'Sair da partida', value: 1, cls: 'red' }]); if (v) leaveGame(true); }, 1800); }
+  }
   $('actionBar').innerHTML = bar;
   if (ph === 'ask' && !$('modal').innerHTML) {
     const d = pe.data, nonce = pe.nonce; LOCAL.modalNonce = nonce;
@@ -1720,10 +1780,11 @@ document.addEventListener('click', async e => {
   if (t.dataset.color !== undefined) return sendAct({ kind: 'color', color: +t.dataset.color });
   if (t.id === 'btnLeave') return leaveTable();
   if (t.id === 'btnMenu' || t.id === 'btnAgain') {
-    if (MODE === 'local' && G && G.players && !G.over && !Object.keys(G.pend).length) return toast('Espere a jogada terminar para voltar ao menu.');
+    if (G && G.players && !G.over && (MODE === 'local' || NET.isHost)) return leaveGame();
     if (MODE === 'online' && NET.isHost && G && G.status === 'playing' && !G.over) { const ok = await askLocal('Sair da mesa?', 'Você é o anfitrião: se sair, a partida fica parada até você voltar.', [{ label: 'Sair', value: 1, cls: 'red' }, { label: 'Ficar', value: 0, cls: 'ghost' }]); if (!ok) return; }
     return leaveTable();
   }
+  if (t.id === 'btnLeave') return leaveGame();
   if (t.id === 'btnLog') { $('logDrawer').classList.toggle('open'); return; }
   if (t.id === 'btnRules') { await askLocal('Regras', '', [{ label: 'Fechar', value: 1 }], rulesHTML()); return; }
   if (t.id === 'btnSpeed') { SPEED = SPEED === 1 ? .45 : 1; t.innerHTML = `${ic('gauge')}${SPEED === 1 ? 'Normal' : 'Rápido'}`; document.documentElement.style.setProperty('--spd', SPEED); return; }
