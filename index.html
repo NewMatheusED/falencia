@@ -460,7 +460,7 @@ const traitNames = t => TRAITS.filter(x => t & x).map(x => TNAME[x]).join(' · '
 
 const KINGS = [
   { name: 'Rei Quebra-Crânio', short: 'Fúria', tr: CH | BA, lend: 'par', text: 'Fúria: ao vencer por aproximação, elimina 2 cartas em vez de 1; ao cravar, além de roubar, elimina 1 carta.' },
-  { name: 'Rainha Musgo-Podre', short: 'Brotar', tr: VE | MA, lend: 'baixo', text: 'Brotar: no início da rodada, se você tiver menos cartas que todos os rivais, puxa 1 carta aleatória do seu cemitério.' },
+  { name: 'Rainha Musgo-Podre', short: 'Brotar', tr: VE | MA, lend: 'baixo', text: 'Brotar: no início da rodada, se você tiver menos cartas que todos os rivais, o jogador à sua direita escolhe 1 carta do seu cemitério e ela volta para a sua mão.' },
   { name: 'Rei Olho-de-Vidro', short: 'Monóculo', tr: OC | CN, lend: 'impar', text: 'Monóculo: quando o monstro for do território Azul, sua margem é ±2, jogando qualquer goblin.' },
   { name: 'Rainha Dente-de-Ouro', short: 'Mercadora', tr: CH | VE, lend: 'alto', text: 'Mercadora: sempre que compra um item, compra 2 e fica com o melhor.' },
 ];
@@ -469,11 +469,11 @@ const lendTxt = k => LEND[KINGS[k].lend][0];
 
 const ITEMS = {
   LUNETA: ['Luneta', 'Espie o valor do monstro.', 'D', 2],
-  SACRIFICIO: ['Sacrifício', 'Mande 1 goblin seu para o seu cemitério e pegue 1 carta aleatória da mão de um oponente.', 'D', 2],
+  SACRIFICIO: ['Sacrifício', 'Mande 1 goblin seu para o seu cemitério e pegue, às cegas, 1 carta da mão de um oponente.', 'D', 2],
   COROA: ['Coroa Trocada', 'Troque o seu rei ou rainha com o de outro jogador.', 'D', 2],
   PA: ['Pá de Coveiro', 'Puxe 1 carta à sua escolha do seu cemitério.', 'D', 2],
-  LADRAO: ['Ladrão de Túmulos', 'Pegue 1 carta aleatória do cemitério de outro jogador.', 'D', 2],
-  MAO_LEVE: ['Mão Leve', 'Roube 1 item aleatório de um oponente.', 'D', 2],
+  LADRAO: ['Ladrão de Túmulos', 'Embaralhe o cemitério de outro jogador virado para baixo e puxe 1 carta às cegas.', 'D', 2],
+  MAO_LEVE: ['Mão Leve', 'Roube, às cegas, 1 item da mão de um oponente.', 'D', 2],
   ISCA: ['Isca de Monstro', 'Depois que o monstro acorda, troque-o pelo próximo do monte. O Caos da rodada continua valendo para o novo monstro.', 'A', 2],
   BANDEIRA: ['Bandeira', 'Escolha um território: para você, o monstro também é desse território nesta rodada.', 'D', 2],
   DISFARCE: ['Disfarce', 'Escolha uma característica: todos os goblins que você jogar nesta rodada a têm.', 'D', 2],
@@ -490,7 +490,7 @@ const ITEMS = {
   POMADA: ['Pomada de Verruga', 'Se jogou goblin de Verruga: de −3 a +3 na sua soma.', 'A', 2],
   CHINELO: ['Chinelo Veloz', 'Se você perder nesta rodada, um goblin de Chinelo jogado, à sua escolha, volta para a mão.', 'A', 2],
   NAO: ['NÃO!', 'Cancele um item de Monstro Acordado de qualquer jogador. Pode ser respondido com outro NÃO!. O jogo pergunta na hora.', 'A', 3],
-  ARMADILHA: ['Armadilha', 'Nesta rodada, quem roubar ou eliminar uma carta sua perde 1 carta aleatória.', 'A', 2],
+  ARMADILHA: ['Armadilha', 'Nesta rodada, quem roubar ou eliminar uma carta sua perde 1 carta: o jogador à direita dele escolhe qual, às cegas.', 'A', 2],
   GRITO: ['Grito de Guerra', 'O monstro vale +2 ou −2 para todos, à sua escolha.', 'A', 2],
 };
 const NUMERIC = ['PORRETE', 'PE_CABRA', 'AJUSTE', 'OCULOS', 'CHAPEU', 'POCAO', 'POMADA'];
@@ -504,7 +504,7 @@ const CHAOS = {
   MAIOR: ['Corrida dos Grandes', 'O monstro é ignorado: vence a maior soma. Ninguém crava.', 2],
   GIGANTE: ['Monstro Gigante', 'O monstro vale +10.', 2],
   ANAO: ['Monstro Anão', 'O monstro vale −6.', 2],
-  CEGAS: ['Às Cegas', 'Depois que todos jogam, um dos seus goblins jogados é trocado por um goblin aleatório da sua mão.', 4],
+  CEGAS: ['Às Cegas', 'Depois que todos jogam, o jogador à sua direita escolhe, às cegas, 1 dos seus goblins jogados e troca por 1 carta da sua mão.', 4],
   ROLETA: ['Roleta', 'Depois que todos jogam, cada um puxa às cegas 1 carta da mão do jogador à sua direita e soma ao seu palpite. No fim da rodada a carta volta para o dono.', 3],
   MUTANTE: ['Monstro Mutante', 'Na revelação vira um segundo monstro: se for par, o monstro vale +5; se for ímpar, −5.', 2],
   MALDICAO: ['Maldição', 'Uma característica sorteada vale 0. Reis e rainhas com ela ficam desligados.', 2],
@@ -1066,7 +1066,7 @@ async function takeCard(p, o, kind) {
   const g = o.hand.splice(rnd(o.hand.length), 1)[0];
   if (kind === 'steal') { p.hand.push(g); log(`${nm(p)} roubou uma carta de ${nm(o)}.`); fx({ type: 'toast', to: p.id, text: `Você roubou o ${gobTxt(g)}!` }, false); fx({ type: 'toast', to: o.id, text: `${nm(p)} roubou seu ${gv(g)}!` }, false); await fx({ type: 'fly', from: 'hand:' + o.id, to2: 'hand:' + p.id, card: { g, vis: [p.id, o.id] }, dur: 560 }); }
   else { G.grave[o.id].push(g); log(`${nm(p)} eliminou o ${gobTxt(g)} de ${nm(o)}.`); fx({ type: 'pop', pid: o.id, text: `−1 carta (${gv(g)})` }, false); await fx({ type: 'fly', from: 'hand:' + o.id, to2: 'seat:' + o.id, card: { g, pub: 1, sm: 1 }, dur: 560, rot: 18 }); }
-  if (armed(o, 'ARMADILHA') && p.hand.length) { G.rd[o.id].armed = G.rd[o.id].armed.filter(x => x !== 'ARMADILHA'); const x = p.hand.splice(rnd(p.hand.length), 1)[0]; G.grave[p.id].push(x); log(`Armadilha de ${nm(o)}: ${nm(p)} perdeu o ${gobTxt(x)}.`, 'it'); fx({ type: 'pop', pid: o.id, text: 'Armadilha!', good: true }, false); }
+  if (armed(o, 'ARMADILHA') && p.hand.length) { G.rd[o.id].armed = G.rd[o.id].armed.filter(x => x !== 'ARMADILHA'); const x = p.hand.splice(rnd(p.hand.length), 1)[0]; G.grave[p.id].push(x); const q = rightOf(p); log(`Armadilha de ${nm(o)}: ${q ? nm(q) + ' escolheu às cegas e ' : ''}${nm(p)} perdeu o ${gobTxt(x)}.`, 'it'); fx({ type: 'pop', pid: o.id, text: 'Armadilha!', good: true }, false); }
   sync();
 }
 async function chaosStart() {
@@ -1075,9 +1075,23 @@ async function chaosStart() {
     log(`Caos ativo: ${chaosTitle(k, G.curse)} — ${chaosDesc(k, G.curse)}`, 'ch');
     if (k === 'TROCA') { const hs = A.map(p => p.hand); A.forEach((p, i) => p.hand = hs[(i - 1 + A.length) % A.length]); log('Todos passaram a mão inteira para a esquerda!', 'ch'); fx({ type: 'banner', text: 'Troca-Troca', sub: 'Todos passaram a mão para a esquerda', kind: 'pink' }, false); }
   }
-  for (const p of A) if (hasKing(p, 1) && G.grave[p.id].length && A.every(o => o === p || p.hand.length < o.hand.length)) { const gr = G.grave[p.id], g = gr.splice(rnd(gr.length), 1)[0]; p.hand.push(g); log(`Brotar: ${nm(p)} puxou uma carta do cemitério.`, 'it'); fx({ type: 'toast', to: p.id, text: `Brotar (Rainha Musgo-Podre): o ${gobTxt(g)} voltou do seu cemitério para a mão.` }, false); fx({ type: 'pop', pid: p.id, text: 'Brotar', good: true }, false); }
+  for (const p of A) if (hasKing(p, 1) && G.grave[p.id].length && A.every(o => o === p || p.hand.length < o.hand.length)) {
+    const gr = G.grave[p.id], q = rightOf(p);
+    let g;
+    if (q && isHuman(q)) {
+      const opts = gr.slice().sort((x, y) => gv(x) - gv(y)).map(x => ({ label: gobTxt(x), value: x }));
+      const r = await prompt(q.id, 'ask', { title: 'Brotar', text: `${nm(p)} ativou o Brotar da Rainha Musgo-Podre. Você está à direita: escolha qual carta do cemitério volta para a mão dele.`, options: opts, botValue: opts[0].value });
+      g = gr.includes(+r.value) ? +r.value : opts[0].value;
+    } else g = Math.random() < .7 ? gr.reduce((x, y) => gv(y) < gv(x) ? y : x) : pick(gr);
+    gr.splice(gr.indexOf(g), 1); p.hand.push(g);
+    log(`Brotar: ${q ? nm(q) + ' escolheu o ' + gobTxt(g) + ' e ele voltou' : 'o ' + gobTxt(g) + ' voltou'} do cemitério para ${nm(p)}.`, 'it');
+    fx({ type: 'toast', to: p.id, text: `Brotar: ${q ? nm(q) + ' escolheu o' : 'o'} ${gobTxt(g)}, que voltou do seu cemitério para a mão.` }, false);
+    fx({ type: 'pop', pid: p.id, text: 'Brotar', good: true }, false);
+  }
   sync();
 }
+// jogador vivo à direita (o anterior na ordem da mesa)
+function rightOf(p) { for (let k = 1; k < G.n; k++) { const q = G.players[(p.id - k + G.n) % G.n]; if (q.alive && q !== p) return q; } return null; }
 function checkOuts() {
   for (const p of alivePl()) if (!p.hand.length) { p.alive = false; p.out = G.round; log(`${nm(p)} faliu!`, 'rh'); fx({ type: 'pop', pid: p.id, text: 'Faliu' }, false); }
   if (alivePl().length <= 1) { G.over = true; G.winner = alivePl()[0] ? alivePl()[0].id : null; }
@@ -1192,7 +1206,7 @@ async function playRound() {
     if (!G.rd[p.id].gs.length) G.rd[p.id].gs = botChoose(p, G.rd[p.id].hint);
   }
   // cartas que mudam depois da escolha
-  if (chaosIs('CEGAS')) for (const p of players) { const rd = G.rd[p.id], rest = p.hand.filter(g => !rd.gs.includes(g)); if (!rest.length || !rd.gs.length) continue; const i = rnd(rd.gs.length), out = rd.gs[i], inn = pick(rest); rd.gs[i] = inn; rd.note = `Às Cegas: ${gobTxt(out)} virou ${gobTxt(inn)}`; fx({ type: 'toast', to: p.id, text: `Às Cegas: seu ${gobTxt(out)} foi trocado pelo ${gobTxt(inn)}.` }, false); }
+  if (chaosIs('CEGAS')) for (const p of players) { const rd = G.rd[p.id], rest = p.hand.filter(g => !rd.gs.includes(g)); if (!rest.length || !rd.gs.length) continue; const i = rnd(rd.gs.length), out = rd.gs[i], inn = pick(rest); rd.gs[i] = inn; const q = rightOf(p); rd.note = `Às Cegas: ${gobTxt(out)} virou ${gobTxt(inn)}`; log(`Às Cegas: ${q ? nm(q) + ' trocou' : 'trocou'} um goblin de ${nm(p)}.`, 'ch'); fx({ type: 'toast', to: p.id, text: `Às Cegas: ${q ? nm(q) + ' (à sua direita) trocou' : 'trocou'} seu ${gobTxt(out)} pelo ${gobTxt(inn)}.` }, false); }
   if (chaosIs('ROLETA')) for (const p of players) {
     const rd = G.rd[p.id]; if (!rd.gs.length) continue;
     let q = null; for (let k = 1; k < G.n; k++) { const c = G.players[(p.id - k + G.n) % G.n]; if (c.alive && c !== p && c.hand.some(g => !G.rd[c.id].gs.includes(g) && !Object.values(G.rd).some(r => r.borrow === g))) { q = c; break; } }
@@ -1681,7 +1695,7 @@ const TIP = {
   select: { target: '#hand', title: 'Monstro dormindo', text: 'Clique em até 3 goblins: a soma é o seu palpite. Se algum goblin for do território do monstro (bolinhas coloridas na carta do monstro), você ganha margem de ±1. Itens com a lua podem ser usados agora. Depois clique em <b>Jogar</b>.' },
   window: { target: '#trayBox', title: 'Monstro acordado', text: 'O monstro acordou. Agora valem os itens com o sol, para todos ao mesmo tempo e sem ordem. Se alguém usar um item, quem tiver NÃO! pode cancelar, e o outro pode responder com outro NÃO!. A janela só fecha quando todos passarem.' },
   steal: { target: '#actionBar', title: 'Cravou', text: 'Clique nos rivais para roubar cartas às cegas: pode ser 1 de cada ou 2 do mesmo.' },
-  elim: { target: '#actionBar', title: 'Venceu por aproximação', text: 'Clique num rival para eliminar 1 carta aleatória da mão dele. Ela vai para o cemitério dele.' },
+  elim: { target: '#actionBar', title: 'Venceu por aproximação', text: 'Clique num rival para eliminar, às cegas, 1 carta da mão dele. Ela vai para o cemitério dele.' },
   draw: { target: '#itemDeck', title: 'Compre seu item', text: 'Todo vencedor compra 1 item. Clique no monte de itens.' },
   chaos: { target: '#chaosDeck', title: 'Carta de Caos', text: 'No fim de toda rodada, uma carta de Caos é revelada e muda a regra da próxima rodada para todos. Clique no monte de Caos.' },
 };
